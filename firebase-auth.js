@@ -4,10 +4,10 @@ import { getFirestore, doc, getDoc, setDoc, onSnapshot, serverTimestamp } from '
 
 // 將 Firebase Console > Project settings > Your apps 的 Firebase Web App 設定填入此處。
 const firebaseConfig = {
-  apiKey: 'YOUR_FIREBASE_API_KEY',
-  authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-  projectId: 'YOUR_PROJECT_ID',
-  appId: 'YOUR_FIREBASE_APP_ID'
+  apiKey: 'AIzaSyBx_a3TRxHFZ5XVP5taajMNd0lwq0mGkKU',
+  authDomain: 'applearning-3162d.firebaseapp.com',
+  projectId: 'applearning-3162d',
+  appId: '1:228269124376:web:e86043e1e6ab7a09ed4c6d'
 };
 const configured = Object.values(firebaseConfig).every(value => value && !value.includes('YOUR_'));
 const localStateKey = 'dayform-state';
