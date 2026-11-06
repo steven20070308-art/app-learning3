@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f7f7f4" />
+  <title>日序 — 個人行程與目標</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="日序首頁"><span class="brand-mark">日</span><span>日序<span class="brand-en">DAYFORM</span></span></a>
+      <div class="nav-label">工作空間</div>
+      <nav class="primary-nav" aria-label="主要導覽">
+        <a href="#today" class="nav-item active"><span class="nav-icon">▦</span>今日總覽 <span class="nav-indicator"></span></a>
+        <a href="#goals" class="nav-item"><span class="nav-icon">◎</span>年度目標 <span class="nav-count">3</span></a>
+        <a href="#tasks" class="nav-item"><span class="nav-icon">☷</span>所有任務</a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="nav-label category-heading">分類 <button class="tiny-add" id="addCategory" title="新增分類" aria-label="新增分類">＋</button></div>
+      <div class="category-list">
+        <button class="category-filter selected" data-filter="all"><span class="category-dot all-dot">✳</span>全部項目<span class="cat-total" id="allCount">0</span></button>
+        <button class="category-filter" data-filter="生活"><span class="category-dot life"></span>生活<span class="cat-total" id="生活Count">0</span></button>
+        <button class="category-filter" data-filter="工作"><span class="category-dot work"></span>工作<span class="cat-total" id="工作Count">0</span></button>
+        <button class="category-filter" data-filter="學習"><span class="category-dot study"></span>學習<span class="cat-total" id="學習Count">0</span></button>
+      </div>
+      <div class="sidebar-bottom">
+        <div class="focus-card"><div class="focus-top"><span class="focus-spark">✦</span><span>本週專注</span><span class="focus-live">●</span></div><div class="focus-number">12.5 <small>小時</small></div><div class="focus-track"><span></span></div><div class="focus-foot"><span>本週目標 18 小時</span><span>69%</span></div></div>
+        <button class="profile-button" id="profileBtn"><span class="avatar">林</span><span class="profile-text"><b>林育晨</b><small>個人工作區</small></span><span class="profile-menu">···</span></button>
+      </div>
+    </aside>
+
+    <main class="main-content" id="today">
+      <header class="topbar"><div class="breadcrumb">工作空間 <span>/</span> <b>今日總覽</b></div><div class="top-actions"><div class="date-display"><span class="calendar-icon">▦</span><span id="headerDate">2026 年 10 月 30 日</span></div><button class="icon-button" id="notificationBell" aria-label="通知設定" title="通知設定">♧<i class="bell-dot"></i></button><button class="avatar top-avatar" aria-label="個人帳戶">林</button></div></header>
+      <div class="content-wrap">
+        <section class="welcome-row"><div><div class="eyebrow"><span class="sun-icon">☀</span>星期五 · 美好的一天</div><h1>早安，育晨<span class="wave">✳</span></h1><p class="welcome-sub">把重要的事，安排進值得期待的一天。</p></div><div class="welcome-date"><span id="longDate">2026年10月30日 星期五</span><span class="weather">☀ <b>24°</b> <small>台北</small></span></div></section>
+        <section class="stats-grid" aria-label="今日摘要">
+          <article class="stat-card"><div class="stat-label">今日完成進度 <span class="stat-icon green">↗</span></div><div class="stat-main"><strong id="doneStat">0</strong><span>/ <span id="totalStat">0</span> 項任務</span></div><div class="stat-progress"><span id="dailyProgress"></span></div><div class="stat-foot"><span class="trend">↑ 進度穩定</span><span id="progressCaption">保持節奏</span></div></article>
+          <article class="stat-card"><div class="stat-label">接下來的行程 <span class="stat-icon violet">◷</span></div><div class="stat-main"><strong id="nextTime">09:30</strong><span class="next-pill">即將開始</span></div><div class="stat-note" id="nextEvent">產品週會 · 會議室 A</div><div class="stat-foot"><span>下一個行程</span><span id="remainingCount">今日 0 個行程</span></div></article>
+          <article class="stat-card"><div class="stat-label">年度目標進度 <span class="stat-icon amber">◎</span></div><div class="stat-main"><strong id="goalStat">0%</strong><span>平均完成度</span></div><div class="mini-goals" id="miniGoals"></div><div class="stat-foot"><span>2026 年度目標</span><a href="#goals">查看全部 →</a></div></article>
+        </section>
+
+        <section class="workspace-grid">
+          <article class="panel schedule-panel"><div class="panel-header"><div><div class="section-kicker">YOUR DAY</div><div class="panel-title-row"><h2>今日行程</h2><span class="today-chip">今天</span></div></div><div class="panel-actions"><button class="icon-button subtle" id="prevDay" aria-label="前一天">‹</button><button class="icon-button subtle" id="nextDay" aria-label="後一天">›</button><button class="text-action" id="importScheduleBtn">⇧ 匯入課表</button><button class="text-action" id="addEventTop">＋ 新增行程</button><input id="scheduleFileInput" type="file" accept=".csv,text/csv" hidden></div></div><div class="schedule-date-row"><span id="scheduleDate">10月 30日 · 星期五</span><span class="schedule-legend"><i></i>現在時間</span></div><div class="timeline" id="timeline"></div><div class="schedule-footer"><span class="calendar-mini">▦</span><span>今天還有 <b id="eventRemaining">0 個行程</b> 等待完成</span><button id="viewCalendar">查看週行事曆 <span>→</span></button></div></article>
+          <article class="panel tasks-panel" id="tasks"><div class="panel-header"><div><div class="section-kicker">STAY ON TRACK</div><div class="panel-title-row"><h2>今日待辦</h2><span class="task-count" id="taskCount">0</span></div></div><button class="text-action" id="addTaskTop">＋ 新增任務</button></div><div class="task-tabs"><button class="task-tab active" data-task-tab="today">今天 <span id="tabTodayCount">0</span></button><button class="task-tab" data-task-tab="upcoming">即將到期</button><button class="task-tab" data-task-tab="done">已完成</button><button class="more-filter" id="taskFilterBtn">☷</button></div><div class="task-list" id="taskList"></div><button class="add-task-row" id="addTaskBottom"><span>＋</span>新增任務 <kbd>N</kbd></button><div class="task-bottom-note"><span>✦</span> 每完成一小步，都在靠近更大的目標。</div></article>
+        </section>
+
+        <section class="goals-section" id="goals"><div class="goals-header"><div><div class="section-kicker">THINK BIG, START SMALL</div><div class="goals-title-row"><h2>我的年度目標</h2><span class="year-badge">2026</span></div></div><button class="outline-action" id="addGoalBtn">＋ 新增目標</button></div><div class="goals-grid" id="goalsGrid"></div><div class="goal-footer"><span>✧</span><span>目標不必一步到位，只要每天前進一點點。</span><button id="allGoalsBtn">查看目標計畫 <b>→</b></button></div></section>
+        <footer class="page-footer"><span>日序 DAYFORM</span><span>讓每一天，都朝著想去的方向。</span><span>Made for a more intentional life <span class="footer-heart">♥</span></span></footer>
+      </div>
+    </main>
+  </div>
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  <div class="modal-backdrop" id="modalBackdrop" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><div><div class="section-kicker" id="modalKicker">MAKE IT HAPPEN</div><h2 id="modalTitle">新增任務</h2></div><button class="modal-close" id="modalClose" aria-label="關閉">×</button></div><form id="entryForm"><div id="formFields"></div><div class="modal-actions"><button type="button" class="cancel-button" id="modalCancel">取消</button><button class="submit-button" type="submit">儲存</button></div></form></section></div>
+  <div class="modal-backdrop" id="scheduleImportBackdrop" hidden><section class="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="importTitle"><div class="modal-head"><div><div class="section-kicker">RECURRING SCHEDULE</div><h2 id="importTitle">匯入每週課表</h2></div><button class="modal-close" id="importClose" aria-label="關閉">×</button></div><p class="import-intro">已讀取 CSV 課表。設定學期日期與台灣國定假日，檢查課程後再建立行程。</p><form id="scheduleImportForm"><div class="field-grid"><div class="form-field"><label for="termStart">學期開始日期</label><input id="termStart" name="termStart" type="date" required></div><div class="form-field"><label for="termEnd">學期結束日期</label><input id="termEnd" name="termEnd" type="date" required></div><label class="holiday-toggle"><input id="skipHolidays" type="checkbox" checked><span><b>排除國定假日</b><small>台灣國定假日不上課</small></span></label></div><div class="import-preview-heading"><b id="importPreviewCount">課程預覽</b><span>每週重複 · 依學期日期產生</span></div><div class="import-preview" id="importPreview"></div><div class="modal-actions"><button type="button" class="cancel-button" id="importCancel">取消</button><button class="submit-button" type="submit">匯入課程行程</button></div></form></section></div>  <div class="settings-backdrop" id="settingsBackdrop" hidden><section class="settings-panel"><div class="settings-head"><div><div class="section-kicker">PREFERENCES</div><h2>通知與提醒</h2></div><button class="modal-close" id="settingsClose" aria-label="關閉">×</button></div><div class="notification-card"><span class="notification-symbol">♧</span><div><b>瀏覽器通知</b><p id="permissionText">開啟提醒，別錯過重要行程。</p></div></div><button class="permission-button" id="permissionButton">啟用通知權限</button><div class="setting-divider"></div><label class="setting-toggle"><span><b>行程開始前提醒</b><small>在行程開始前收到通知</small></span><input type="checkbox" id="eventReminder" checked><i></i></label><div class="reminder-select-row"><span>提前提醒</span><select id="reminderMinutes"><option value="5">5 分鐘</option><option value="10" selected>10 分鐘</option><option value="15">15 分鐘</option><option value="30">30 分鐘</option></select></div><div class="setting-divider"></div><label class="setting-toggle"><span><b>任務到期提醒</b><small>在到期時間通知我</small></span><input type="checkbox" id="taskReminder" checked><i></i></label><div class="settings-note">提醒會在此頁面開啟時運作；關閉頁面後，瀏覽器不會在背景持續排程通知。</div></section></div>
+  <script src="app.js"></script>
+</body>
+</html>
+
+
