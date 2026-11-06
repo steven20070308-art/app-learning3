@@ -29,7 +29,10 @@ try { state=JSON.parse(localStorage.getItem('dayform-state'))||structuredClone(i
 let taskTab='today',categoryFilter='all',modalType=null,editingId=null,notificationTimers=[];
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const save=()=>localStorage.setItem('dayform-state',JSON.stringify(state));
+const localSave=()=>localStorage.setItem('dayform-state',JSON.stringify(state));
+const save=()=>{localSave();window.dispatchEvent(new CustomEvent('dayform-state-changed',{detail:{state}}))};
+window.addEventListener('dayform-cloud-state',event=>{if(!event.detail?.state)return;state={...structuredClone(initialState),...event.detail.state};render()});
+window.addEventListener('dayform-auth-changed',event=>{const user=event.detail?.user;if(user){const local=localStorage.getItem('dayform-state');if(local)window.dispatchEvent(new CustomEvent('dayform-local-state-ready',{detail:{state:JSON.parse(local)}}))}});
 function toast(message,error=false){const node=document.createElement('div');node.className='toast'+(error?' error':'');node.textContent=message;$('#toastRegion').append(node);setTimeout(()=>node.remove(),3000)}
 function pct(goal){if(goal.manual!==null&&goal.manual!==undefined)return Math.max(0,Math.min(100,Number(goal.manual)));const weight=goal.milestones.reduce((sum,m)=>sum+(Number(m.weight)||0),0);if(!weight)return 0;return Math.round(goal.milestones.reduce((sum,m)=>sum+(m.done?(Number(m.weight)||0):0),0)/weight*100)}
 function renderDate(){const d=new Date(`${selectedDate}T12:00:00`);const weekday=new Intl.DateTimeFormat('zh-TW',{weekday:'long'}).format(d);$('#headerDate').textContent=`${d.getFullYear()} 年 ${d.getMonth()+1} 月 ${d.getDate()} 日`;$('#longDate').textContent=`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${weekday}`;document.querySelector('.eyebrow').innerHTML=`<span class="sun-icon">☀</span>${weekday} · 美好的一天`;$('#scheduleDate').textContent=`${d.getMonth()+1}月 ${d.getDate()}日 · ${weekday}`}
