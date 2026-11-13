@@ -15,6 +15,8 @@ function getSavedLocalState() { return localStorage.getItem(localStateKey); }
 const button = document.querySelector('#authButton');
 const app = configured ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
+if (auth) auth.useDeviceLanguage();
+let signInInProgress = false;
 const db = app ? getFirestore(app) : null;
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: 'select_account' });
@@ -80,21 +82,27 @@ if (button) button.addEventListener('click', async () => {
     return;
   }
   try {
+    if (signInInProgress) return;
     if (auth.currentUser) {
       activeUid = null; if (stopSync) stopSync(); stopSync = null; if (stateListener) window.removeEventListener('dayform-state-changed', stateListener); stateListener = null;
       await signOut(auth);
       return;
     }
     await persistenceReady;
-    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) await signInWithRedirect(auth, provider);
-    else await signInWithPopup(auth, provider);
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      signInInProgress = true;
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+    await signInWithPopup(auth, provider);
   } catch (error) {
     console.error('Google 登入失敗', error);
-    alert(`Google 登入失敗：${error.message || error.code}`);
+    signInInProgress = false;
+    alert(`Google 登入失敗：${error.code || error.message || error}`);
   }
 });
 if (auth) {
-  persistenceReady.then(() => getRedirectResult(auth)).catch(error => { console.error('Google 登入回傳處理失敗', error); alert(`Google 登入失敗：${error.message || error.code}`); });
+  persistenceReady.then(() => getRedirectResult(auth)).then(result => { signInInProgress = false; if (result?.user) setSession(result.user); }).catch(error => { console.error('Google 登入回傳處理失敗', error); signInInProgress = false; alert(`Google 登入失敗：${error.code || error.message || error}`); });
   onAuthStateChanged(auth, user => {
     setSession(user);
     if (user) { window.__dayformCloudInitialized = false; startSync(user); }
