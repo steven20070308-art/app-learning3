@@ -20,7 +20,7 @@ let signInInProgress = false;
 const db = app ? getFirestore(app) : null;
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: 'select_account' });
-let stopSync = null, saveTimer = null, activeUid = null, stateListener = null, persistenceReady = Promise.resolve();
+let stopSync = null, saveTimer = null, activeUid = null, stateListener = null, persistenceReady = Promise.resolve(), syncReady = false;
 if (auth) persistenceReady = setPersistence(auth, indexedDBLocalPersistence).catch(error => {
   console.warn('IndexedDB persistence unavailable; falling back to browser local persistence.', error);
   return setPersistence(auth, browserLocalPersistence);
@@ -28,6 +28,7 @@ if (auth) persistenceReady = setPersistence(auth, indexedDBLocalPersistence).cat
 
 function setSession(user) {
   window.dispatchEvent(new CustomEvent('dayform-auth-changed', { detail: { user } }));
+  document.documentElement.dataset.firebaseUser = user ? 'signed-in' : 'signed-out';
   if (!button) return;
   button.textContent = user ? (user.displayName || user.email || '帳戶') : '使用 Google 登入';
   button.title = user ? `已登入 ${user.email || ''} · 點擊登出` : '使用 Google 帳號登入';
@@ -35,7 +36,7 @@ function setSession(user) {
 }
 function startSync(user) {
   if (stopSync) stopSync();
-  stopSync = null; activeUid = user.uid;
+  stopSync = null; activeUid = user.uid; syncReady = false;
   const ref = doc(db, 'users', user.uid, 'private', 'dayform');
   getDoc(ref).then(async snapshot => {
     if (activeUid !== user.uid) return;
@@ -45,10 +46,15 @@ function startSync(user) {
       if (choice) await setDoc(ref, { state: JSON.parse(local), updatedAt: serverTimestamp() });
       else await setDoc(ref, { state: { tasks: [], events: [], goals: [], customCategories: [], settings: { eventReminder: true, taskReminder: true, reminderMinutes: 10 } }, updatedAt: serverTimestamp() });
       window.__dayformCloudInitialized = true;
+      syncReady = true;
+      if (choice) window.dispatchEvent(new CustomEvent('dayform-cloud-state', { detail: { state: JSON.parse(local) } }));
+      else window.dispatchEvent(new CustomEvent('dayform-cloud-state', { detail: { state: { tasks: [], events: [], goals: [], customCategories: [], settings: { eventReminder: true, taskReminder: true, reminderMinutes: 10 } } } }));
     } else if (!snapshot.exists()) {
       const state = { tasks: [], events: [], goals: [], customCategories: [], settings: { eventReminder: true, taskReminder: true, reminderMinutes: 10 } };
       await setDoc(ref, { state, updatedAt: serverTimestamp() });
       window.__dayformCloudInitialized = true;
+      syncReady = true;
+      window.dispatchEvent(new CustomEvent('dayform-cloud-state', { detail: { state } }));
     }
     stopSync = onSnapshot(ref, snap => {
       if (activeUid !== user.uid || !snap.exists()) return;
@@ -60,21 +66,24 @@ function startSync(user) {
           const useCloud = confirm('已找到此 Google 帳號的雲端資料。要使用雲端資料取代本機目前資料嗎？按「確定」使用雲端資料；按「取消」保留本機資料並上傳到雲端。');
           window.__dayformCloudInitialized = true;
           if (!useCloud) {
-            setDoc(ref, { state: JSON.parse(local), updatedAt: serverTimestamp() }).catch(error => alert(`雲端同步失敗：${error.message}`));
+            setDoc(ref, { state: JSON.parse(local), updatedAt: serverTimestamp() }).then(() => { syncReady = true; document.documentElement.dataset.firebaseSync = 'connected'; }).catch(error => { syncReady = false; alert(`雲端同步失敗：${error.code || error.message}`); });
             return;
           }
         } else window.__dayformCloudInitialized = true;
         window.dispatchEvent(new CustomEvent('dayform-cloud-state', { detail: { state: cloudState } }));
+        syncReady = true;
+        window.__dayformCloudInitialized = true;
+        document.documentElement.dataset.firebaseSync = 'connected';
       }
-    }, error => { console.error('Firestore 同步失敗', error); alert(`雲端同步失敗：${error.message}`); });
+    }, error => { console.error('Firestore 同步失敗', error); document.documentElement.dataset.firebaseSync = 'error'; alert(`雲端同步失敗：${error.code || error.message}`); });
     if (stateListener) window.removeEventListener('dayform-state-changed', stateListener);
     stateListener = event => {
-      if (activeUid !== user.uid || !window.__dayformCloudInitialized) return;
+      if (activeUid !== user.uid || !syncReady || !window.__dayformCloudInitialized) return;
       clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => setDoc(ref, { state: event.detail.state, updatedAt: serverTimestamp() }).catch(error => { console.error('Firestore 儲存失敗', error); alert(`雲端儲存失敗：${error.message}`); }), 500);
+      saveTimer = setTimeout(() => setDoc(ref, { state: event.detail.state, updatedAt: serverTimestamp() }).then(() => { document.documentElement.dataset.firebaseSync = 'connected'; }).catch(error => { console.error('Firestore 儲存失敗', error); document.documentElement.dataset.firebaseSync = 'error'; alert(`雲端儲存失敗：${error.code || error.message}`); }), 500);
     };
     window.addEventListener('dayform-state-changed', stateListener);
-  }).catch(error => { console.error('讀取雲端資料失敗', error); alert(`無法讀取雲端資料：${error.message}`); });
+  }).catch(error => { console.error('讀取雲端資料失敗', error); syncReady = false; document.documentElement.dataset.firebaseSync = 'error'; alert(`無法讀取雲端資料：${error.code || error.message}`); });
 }
 if (button) button.addEventListener('click', async () => {
   if (!configured) {
@@ -110,7 +119,7 @@ if (auth) {
   persistenceReady.then(() => getRedirectResult(auth)).then(result => { signInInProgress = false; if (result?.user) setSession(result.user); }).catch(error => { console.error('Google 登入回傳處理失敗', error); signInInProgress = false; alert(error.code === 'auth/missing-initial-state' ? '登入狀態無法在此瀏覽器保存（常見於 App 內建瀏覽器或隱私模式）。請點瀏覽器選單，以 Safari／Chrome 外部瀏覽器重新開啟此網站後登入。' : `Google 登入失敗：${error.code || error.message || error}`); });
   onAuthStateChanged(auth, user => {
     setSession(user);
-    if (user) { window.__dayformCloudInitialized = false; startSync(user); }
-    else { activeUid = null; if (stopSync) stopSync(); stopSync = null; if (stateListener) window.removeEventListener('dayform-state-changed', stateListener); stateListener = null; }
+    if (user) { window.__dayformCloudInitialized = false; document.documentElement.dataset.firebaseSync = 'syncing'; startSync(user); }
+    else { activeUid = null; syncReady = false; document.documentElement.dataset.firebaseSync = 'offline'; if (stopSync) stopSync(); stopSync = null; if (stateListener) window.removeEventListener('dayform-state-changed', stateListener); stateListener = null; }
   });
 } else setSession(null);
