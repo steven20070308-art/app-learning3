@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, browserLocalPersistence, indexedDBLocalPersistence, setPersistence } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 
 // 將 Firebase Console > Project settings > Your apps 的 Firebase Web App 設定填入此處。
@@ -18,7 +18,11 @@ const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: 'select_account' });
-let stopSync = null, saveTimer = null, activeUid = null, stateListener = null;
+let stopSync = null, saveTimer = null, activeUid = null, stateListener = null, persistenceReady = Promise.resolve();
+if (auth) persistenceReady = setPersistence(auth, indexedDBLocalPersistence).catch(error => {
+  console.warn('IndexedDB persistence unavailable; falling back to browser local persistence.', error);
+  return setPersistence(auth, browserLocalPersistence);
+});
 
 function setSession(user) {
   window.dispatchEvent(new CustomEvent('dayform-auth-changed', { detail: { user } }));
@@ -81,6 +85,7 @@ if (button) button.addEventListener('click', async () => {
       await signOut(auth);
       return;
     }
+    await persistenceReady;
     if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) await signInWithRedirect(auth, provider);
     else await signInWithPopup(auth, provider);
   } catch (error) {
@@ -89,7 +94,7 @@ if (button) button.addEventListener('click', async () => {
   }
 });
 if (auth) {
-  getRedirectResult(auth).catch(error => { console.error('Google 登入回傳處理失敗', error); alert(`Google 登入失敗：${error.message || error.code}`); });
+  persistenceReady.then(() => getRedirectResult(auth)).catch(error => { console.error('Google 登入回傳處理失敗', error); alert(`Google 登入失敗：${error.message || error.code}`); });
   onAuthStateChanged(auth, user => {
     setSession(user);
     if (user) { window.__dayformCloudInitialized = false; startSync(user); }
