@@ -91,18 +91,23 @@ if (button) button.addEventListener('click', async () => {
     await persistenceReady;
     if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
       signInInProgress = true;
-      await signInWithRedirect(auth, provider);
+      try {
+        await signInWithPopup(auth, provider);
+      } catch (popupError) {
+        if (!['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/operation-not-supported-in-this-environment'].includes(popupError.code)) throw popupError;
+        await signInWithRedirect(auth, provider);
+      }
       return;
     }
     await signInWithPopup(auth, provider);
   } catch (error) {
     console.error('Google 登入失敗', error);
     signInInProgress = false;
-    alert(`Google 登入失敗：${error.code || error.message || error}`);
+    alert(error.code === 'auth/missing-initial-state' ? '登入狀態無法在此瀏覽器保存（常見於 App 內建瀏覽器或隱私模式）。請點瀏覽器選單，以 Safari／Chrome 外部瀏覽器重新開啟此網站後登入。' : `Google 登入失敗：${error.code || error.message || error}`);
   }
 });
 if (auth) {
-  persistenceReady.then(() => getRedirectResult(auth)).then(result => { signInInProgress = false; if (result?.user) setSession(result.user); }).catch(error => { console.error('Google 登入回傳處理失敗', error); signInInProgress = false; alert(`Google 登入失敗：${error.code || error.message || error}`); });
+  persistenceReady.then(() => getRedirectResult(auth)).then(result => { signInInProgress = false; if (result?.user) setSession(result.user); }).catch(error => { console.error('Google 登入回傳處理失敗', error); signInInProgress = false; alert(error.code === 'auth/missing-initial-state' ? '登入狀態無法在此瀏覽器保存（常見於 App 內建瀏覽器或隱私模式）。請點瀏覽器選單，以 Safari／Chrome 外部瀏覽器重新開啟此網站後登入。' : `Google 登入失敗：${error.code || error.message || error}`); });
   onAuthStateChanged(auth, user => {
     setSession(user);
     if (user) { window.__dayformCloudInitialized = false; startSync(user); }
