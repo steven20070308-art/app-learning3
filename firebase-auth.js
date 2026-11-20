@@ -61,10 +61,15 @@ function planningContext() {
 }
 function showPlannerError(message) { plannerResult.hidden=false; plannerResult.innerHTML=''; const box=document.createElement('div'); box.className='ai-error'; box.textContent=message; plannerResult.append(box); }
 function formatTime(value){return /^([01]\d|2[0-3]):[0-5]\d$/.test(value||'')}
-function isTransientAiError(error) {
-  return /(?:\b503\b|\b504\b|deadline expired|temporarily unavailable|fetch-error)/i.test(String(error?.code || '') + ' ' + String(error?.message || ''));
+function timeToMinutes(value) {
+  if (!formatTime(value)) return null;
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours * 60 + minutes;
 }
-async function generateWithRetry(model, request, modelName) {
+function isTransientAiError(error) {
+  const details = String(error?.code || '') + ' ' + String(error?.message || '');
+  return /(?:\b503\b|\b504\b|deadline expired|temporarily unavailable|fetch-error|failed to fetch|error fetching|networkerror|network error|load failed|err_connection|err_name_not_resolved)/i.test(details);
+}async function generateWithRetry(model, request, modelName) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       return await model.generateContent(request);
@@ -84,7 +89,7 @@ function renderProposals(data){
   (data.proposals||[]).slice(0,6).forEach((item,index)=>{
     if(!item||typeof item.title!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(item.date)||!formatTime(item.startTime)||!formatTime(item.endTime)||item.endTime<=item.startTime)return;
     const row=document.createElement('label');row.className='ai-proposal';
-    const check=document.createElement('input');check.type='checkbox';check.checked=true;check.dataset.proposal=String(index);
+    const check=document.createElement('input');check.type='checkbox';check.checked=true;check.proposal=item;
     const copy=document.createElement('span');const title=document.createElement('span');title.className='ai-proposal-title';title.textContent=item.title;const detail=document.createElement('span');detail.className='ai-proposal-detail';detail.textContent=String(item.date)+' · '+item.startTime+'–'+item.endTime+' · '+(item.place||'');copy.append(title,detail);
     const category=document.createElement('span');category.className='task-category 學習';category.textContent=item.category||'學習';row.append(check,copy,category);list.append(row);
   });
@@ -92,11 +97,35 @@ function renderProposals(data){
   plannerResult.append(list);
   const actions=document.createElement('div');actions.className='ai-proposal-actions';
   const dismiss=document.createElement('button');dismiss.type='button';dismiss.textContent='取消';dismiss.onclick=()=>{plannerResult.hidden=true};
-  const apply=document.createElement('button');apply.type='button';apply.className='apply-ai-proposal';apply.textContent='確認並加入行程';apply.onclick=()=>{
-    const checks=[...list.querySelectorAll('input[type=checkbox]')];let added=0;
-    plannerResult.hidden=true;window.dispatchEvent(new CustomEvent('dayform-refresh'));if(added)alert('已加入 '+added+' 筆 AI 行程草案。');else alert('沒有加入行程：請勾選草案，並確認時間沒有與既有行程重疊。');
-  };
-  actions.append(dismiss,apply);plannerResult.append(actions);
+  const apply=document.createElement('button');apply.type='button';apply.className='apply-ai-proposal';apply.textContent='確認並加入行程';
+  apply.onclick=()=>{
+    const checks=[...list.querySelectorAll('input[type=checkbox]:checked')];
+    if(!checks.length){alert('請先勾選要加入的行程草案。');return}
+    const now=new Date();
+    const today=window.dayformTodayISO?.()||[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
+    let added=0;
+    const conflicts=[];
+    for(const check of checks){
+      const item=check.proposal;
+      if(!item)continue;
+      const start=timeToMinutes(item.startTime),end=timeToMinutes(item.endTime);
+      if(start===null||end===null||end<=start)continue;
+      const events=window.dayformState?.events||[];
+      const conflict=events.find(e=>{
+        if((e.date||today)!==item.date)return false;
+        const eventStart=timeToMinutes(e.time),eventEnd=timeToMinutes(e.end);
+        return eventStart!==null&&eventEnd!==null&&eventEnd>eventStart&&start<eventEnd&&end>eventStart;
+      });
+      if(conflict){conflicts.push(item.startTime+'–'+item.endTime+' 與「'+conflict.title+'」'+conflict.time+'–'+conflict.end+' 重疊');continue}
+      window.dispatchEvent(new CustomEvent('dayform-add-ai-event',{detail:{event:{id:crypto.randomUUID(),title:item.title,category:['工作','生活','學習'].includes(item.category)?item.category:'學習',date:item.date,time:item.startTime,end:item.endTime,place:item.place||'Gemini 建議',source:'gemini'}}}));
+      added++;
+    }
+    plannerResult.hidden=true;
+    window.dispatchEvent(new CustomEvent('dayform-refresh'));
+    if(added)alert('已加入 '+added+' 筆 AI 行程草案。');
+    else if(conflicts.length)alert('沒有加入行程，時段與既有行程重疊：'+conflicts.join('；'));
+    else alert('行程沒有加入，請重新產生草案後再試。');
+  };  actions.append(dismiss,apply);plannerResult.append(actions);
 }
 if(plannerForm)plannerForm.addEventListener('submit',async event=>{
   event.preventDefault();const prompt=document.querySelector('#aiPlannerPrompt').value.trim();if(!prompt)return;
@@ -116,8 +145,13 @@ if(plannerForm)plannerForm.addEventListener('submit',async event=>{
       result=await generateWithRetry(fallbackPlannerModel,request,'Gemini 3.5 Flash');
     }
     const text=result.response.text();renderProposals(JSON.parse(text));
-  }catch(error){console.error('Gemini 行程規劃失敗',error);showPlannerError('無法產生建議：'+(error.message||error.code||'請稍後再試。請確認 Firebase AI Logic 已啟用。'));}
-  finally{run.disabled=false;run.textContent='✦ 產生安排'}
+  }catch(error){
+    console.error('Gemini 行程規劃失敗',error);
+    const message=isTransientAiError(error)
+      ? 'AI 服務連線失敗，已重試主要及備援模型。請確認網路可連線至 firebasevertexai.googleapis.com 後再試。'
+      : '無法產生建議：'+(error.message||error.code||'請稍後再試。請確認 Firebase AI Logic 已啟用。');
+    showPlannerError(message);
+  }  finally{run.disabled=false;run.textContent='✦ 產生安排'}
 });
 window.addEventListener('dayform-state-changed',event=>{window.dayformState=event.detail?.state||window.dayformState});
 window.addEventListener('dayform-cloud-state',event=>{window.dayformState=event.detail?.state||window.dayformState});
