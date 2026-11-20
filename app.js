@@ -60,8 +60,43 @@ function renderDate(){const d=new Date(`${selectedDate}T12:00:00`);const weekday
 function renderStats(){const done=state.tasks.filter(t=>t.done).length,total=state.tasks.length,progress=total?Math.round(done/total*100):0;$('#doneStat').textContent=done;$('#totalStat').textContent=total;$('#dailyProgress').style.width=progress+'%';$('#progressCaption').textContent=progress>=80?'太棒了，繼續保持':progress>=40?'保持節奏':'一步一步來';$('#taskCount').textContent=state.tasks.filter(t=>!t.done).length;$('#tabTodayCount').textContent=state.tasks.filter(t=>!t.done).length;
  const goals=state.goals;$('#goalStat').textContent=(goals.length?Math.round(goals.reduce((s,g)=>s+pct(g),0)/goals.length):0)+'%';$('#miniGoals').innerHTML=goals.slice(0,3).map(g=>`<i style="flex:${Math.max(pct(g),8)}" title="${esc(g.title)} ${pct(g)}%"></i>`).join('');
  const counts={'生活':0,'工作':0,'學習':0};state.tasks.forEach(t=>counts[t.category]=(counts[t.category]||0)+1);state.events.forEach(e=>counts[e.category]=(counts[e.category]||0)+1);$('#allCount').textContent=state.tasks.length+state.events.length;Object.keys(counts).forEach(c=>{const el=$(`#${c}Count`);if(el)el.textContent=counts[c]||0});}
-function renderTimeline(){const root=$('#timeline');const hours=Array.from({length:7},(_,i)=>i+8);const nowMin=9*60+20;root.innerHTML=hours.map(hour=>{const time=`${String(hour).padStart(2,'0')}:00`;const events=state.events.filter(e=>(e.date ? e.date===selectedDate : selectedDate===todayISO)&&Number(e.time.slice(0,2))===hour).sort((a,b)=>a.time.localeCompare(b.time));let inner=events.map(e=>{const color=e.category==='生活'?'orange':e.category==='學習'?'violet':'';return `<div class="event-card ${color}" data-event="${esc(e.id)}" tabindex="0"><div class="event-copy"><div class="event-title">${esc(e.title)}</div><div class="event-meta">${esc(e.place||e.category)}</div></div><span class="event-time">${esc(e.time)} – ${esc(e.end||'')}</span></div>`}).join('');if(nowMin>=hour*60&&nowMin<(hour+1)*60)inner+=`<div class="now-line" style="top:${(nowMin-hour*60)/60*47}px"><span class="now-label">現在</span></div>`;return `<div class="time-row"><span class="time-label">${time}</span><div class="time-slot">${inner}</div></div>`}).join('');root.querySelectorAll('.event-card').forEach(card=>card.addEventListener('click',()=>openModal('event',card.dataset.event)));const upcoming=state.events.filter(e=>(e.date ? e.date===selectedDate : selectedDate===todayISO)&&e.time>='09:20').sort((a,b)=>a.time.localeCompare(b.time));$('#remainingCount').textContent=`今日 ${upcoming.length} 個行程`;$('#eventRemaining').textContent=`${upcoming.length} 個行程`;
- const next=upcoming[0];if(next){$('#nextTime').textContent=next.time;$('#nextEvent').textContent=`${next.title} · ${next.place||next.category}`}else{$('#nextTime').textContent='—';$('#nextEvent').textContent='今天的行程都完成了'} }
+function renderTimeline() {
+ const root = $('#timeline');
+ const now = new Date();
+ const currentDate = toLocalISODate(now);
+ const isToday = selectedDate === currentDate;
+ const nowMin = now.getHours() * 60 + now.getMinutes();
+ const nowTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+ const hours = Array.from({length: 24}, (_, i) => i);
+ root.innerHTML = hours.map(hour => {
+  const time = String(hour).padStart(2, '0') + ':00';
+  const events = state.events
+   .filter(e => (e.date || currentDate) === selectedDate && Number((e.time || '').slice(0, 2)) === hour)
+   .sort((a, b) => a.time.localeCompare(b.time));
+  let inner = events.map(e => {
+   const color = e.category === '生活' ? 'orange' : e.category === '學習' ? 'violet' : '';
+   return '<div class="event-card ' + color + '" data-event="' + esc(e.id) + '" tabindex="0"><div class="event-copy"><div class="event-title">' + esc(e.title) + '</div><div class="event-meta">' + esc(e.place || e.category) + '</div></div><span class="event-time">' + esc(e.time) + ' – ' + esc(e.end || '') + '</span></div>';
+  }).join('');
+  if (isToday && nowMin >= hour * 60 && nowMin < (hour + 1) * 60) {
+   inner += '<div class="now-line" style="top:' + ((nowMin - hour * 60) / 60 * 47) + 'px"><span class="now-label">現在</span></div>';
+  }
+  return '<div class="time-row"><span class="time-label">' + time + '</span><div class="time-slot">' + inner + '</div></div>';
+ }).join('');
+ root.querySelectorAll('.event-card').forEach(card => card.addEventListener('click', () => openModal('event', card.dataset.event)));
+ const upcoming = state.events
+  .filter(e => (e.date || currentDate) === selectedDate && (selectedDate > currentDate || (isToday && e.time >= nowTime)))
+  .sort((a, b) => a.time.localeCompare(b.time));
+ $('#remainingCount').textContent = (isToday ? '今日' : '當日') + ' ' + upcoming.length + ' 個行程';
+ $('#eventRemaining').textContent = upcoming.length + ' 個行程';
+ const next = upcoming[0];
+ if (next) {
+  $('#nextTime').textContent = next.time;
+  $('#nextEvent').textContent = next.title + ' · ' + (next.place || next.category);
+ } else {
+  $('#nextTime').textContent = '—';
+  $('#nextEvent').textContent = isToday ? '今天的行程都完成了' : '當日沒有待辦行程';
+ }
+}
 function filteredTasks(){let list=state.tasks;if(taskTab==='today')list=list.filter(t=>!t.done);else if(taskTab==='done')list=list.filter(t=>t.done);else list=list.filter(t=>!t.done&&t.due>='17:00');if(categoryFilter!=='all')list=list.filter(t=>t.category===categoryFilter);return list}
 function renderTasks(){const root=$('#taskList');const tasks=filteredTasks();if(!tasks.length){root.innerHTML=`<div class="empty-state"><span class="empty-icon">✧</span><span>${taskTab==='done'?'完成的任務會出現在這裡':'目前沒有任務，享受一點留白吧。'}</span></div>`;return}root.innerHTML=tasks.map(t=>`<div class="task-row ${t.done?'completed':''}"><input type="checkbox" class="task-check" ${t.done?'checked':''} data-toggle-task="${esc(t.id)}" aria-label="完成 ${esc(t.title)}"><div class="task-copy"><div class="task-title">${esc(t.title)}</div><div class="task-meta"><span class="task-category ${esc(t.category)}">${esc(t.category)}</span><span class="task-due ${t.due<'09:20'&&!t.done?'overdue':''}">${t.due<'09:20'&&!t.done?'逾期 · ':''}${esc(t.due)}</span></div></div>${t.priority==='high'?'<i class="priority-mark high" title="高優先級"></i>':'<i class="priority-mark" title="一般優先級"></i>'}<button class="task-more" data-edit-task="${esc(t.id)}" title="編輯任務">···</button></div>`).join('');root.querySelectorAll('[data-toggle-task]').forEach(el=>el.addEventListener('change',()=>toggleTask(el.dataset.toggleTask)));root.querySelectorAll('[data-edit-task]').forEach(el=>el.addEventListener('click',()=>openModal('task',el.dataset.editTask)))}
 function renderGoals(){const root=$('#goalsGrid');root.innerHTML=state.goals.map(g=>{const value=pct(g),completed=g.milestones.filter(m=>m.done).length;return `<article class="goal-card" data-goal="${esc(g.id)}" tabindex="0"><div class="goal-top"><span class="goal-emoji">${esc(g.emoji||'✦')}</span><span class="goal-name">${esc(g.title)}</span><span class="goal-percent">${value}%</span></div><div class="goal-description">${esc(g.description||`${completed}/${g.milestones.length} 個里程碑完成`)}${g.manual!==null?` · 手動調整`:''}</div><div class="goal-progress"><span style="width:${value}%"></span></div></article>`}).join('')||'<div class="empty-state">新增第一個年度目標，開始規劃你的方向。</div>';root.querySelectorAll('.goal-card').forEach(card=>{card.addEventListener('click',()=>openModal('goal',card.dataset.goal));card.addEventListener('keydown',e=>{if(e.key==='Enter')openModal('goal',card.dataset.goal)})});$('.nav-count').textContent=state.goals.length}
@@ -83,6 +118,20 @@ $('#addCategory').onclick=()=>{const name=prompt('輸入新分類名稱：');if(
 $('#prevDay').onclick=()=>{const d=new Date(`${selectedDate}T12:00:00`);d.setDate(d.getDate()-1);selectedDate=toLocalISODate(d);render()};$('#nextDay').onclick=()=>{const d=new Date(`${selectedDate}T12:00:00`);d.setDate(d.getDate()+1);selectedDate=toLocalISODate(d);render()};$('#viewCalendar').onclick=()=>toast('週行事曆正在規劃中');$('#allGoalsBtn').onclick=()=>toast('目前顯示你的年度目標');$('#profileBtn').onclick=()=>toast('個人工作區設定正在規劃中');
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();$('#settingsBackdrop').hidden=true}if(e.key.toLowerCase()==='n'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&$('#modalBackdrop').hidden){e.preventDefault();openModal('task')}});
 renderGreeting();render();scheduleNotifications();
+let timelineDate = toLocalISODate();
+setInterval(() => {
+ const currentDate = toLocalISODate();
+ renderGreeting();
+ if (currentDate !== timelineDate) {
+  const wasViewingToday = selectedDate === timelineDate;
+  timelineDate = currentDate;
+  if (wasViewingToday) selectedDate = currentDate;
+  render();
+  scheduleNotifications();
+ } else {
+  renderTimeline();
+ }
+}, 60000);
 const SCHOOL_CSV_URL = '../Downloads/課表_1151.csv';
 const TW_HOLIDAYS_2026 = new Set(['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-02-19','2026-02-20','2026-02-27','2026-04-03','2026-04-06','2026-05-01','2026-06-19','2026-09-25','2026-09-28','2026-10-09','2026-10-26']);
 const TW_HOLIDAYS_2027 = new Set(['2027-01-01','2027-02-05','2027-02-08','2027-02-09','2027-02-10','2027-02-11','2027-02-12','2027-02-26','2027-04-05','2027-04-06','2027-04-30','2027-06-09','2027-09-15','2027-09-24','2027-09-27','2027-10-10']);

@@ -1,8 +1,8 @@
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app-check.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, browserLocalPersistence, indexedDBLocalPersistence, setPersistence } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
-import { getAI, getGenerativeModel, GoogleAIBackend, Schema } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-ai.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.8.0/firebase-app.js';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/11.8.0/firebase-app-check.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, browserLocalPersistence, indexedDBLocalPersistence, setPersistence } from 'https://www.gstatic.com/firebasejs/11.8.0/firebase-auth.js';
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.8.0/firebase-firestore.js';
+import { getAI, getGenerativeModel, GoogleAIBackend, Schema } from 'https://www.gstatic.com/firebasejs/11.8.0/firebase-ai.js';
 
 // 將 Firebase Console > Project settings > Your apps 的 Firebase Web App 設定填入此處。
 const firebaseConfig = {
@@ -81,7 +81,6 @@ function renderProposals(data){
   const dismiss=document.createElement('button');dismiss.type='button';dismiss.textContent='取消';dismiss.onclick=()=>{plannerResult.hidden=true};
   const apply=document.createElement('button');apply.type='button';apply.className='apply-ai-proposal';apply.textContent='確認並加入行程';apply.onclick=()=>{
     const checks=[...list.querySelectorAll('input[type=checkbox]')];let added=0;
-    checks.forEach((check,i)=>{if(!check.checked)return;const item=data.proposals[Number(check.dataset.proposal)];if(!item)return;const collision=(window.dayformState?.events||[]).some(e=>(e.date||window.dayformTodayISO?.())===item.date&&e.time<item.endTime&&e.end>item.startTime);if(collision)return;window.dispatchEvent(new CustomEvent('dayform-add-ai-event',{detail:{event:{id:crypto.randomUUID(),title:item.title,category:['工作','生活','學習'].includes(item.category)?item.category:'學習',date:item.date,time:item.startTime,end:item.endTime,place:item.place||'Gemini 建議',source:'gemini'}}}));added++});
     plannerResult.hidden=true;window.dispatchEvent(new CustomEvent('dayform-refresh'));if(added)alert('已加入 '+added+' 筆 AI 行程草案。');else alert('沒有加入行程：請勾選草案，並確認時間沒有與既有行程重疊。');
   };
   actions.append(dismiss,apply);plannerResult.append(actions);
@@ -92,7 +91,7 @@ if(plannerForm)plannerForm.addEventListener('submit',async event=>{
   try{
     if(!plannerModel)throw new Error('Firebase AI Logic 尚未初始化。');
     const input={request:prompt,context:planningContext()};
-    const systemPrompt='你是繁體中文個人行程規劃助理。根據使用者需求和提供的日期、行程、待辦資料，提出最多 4 個可執行的行程草案。禁止與既有行程重疊；不要假設行程已被寫入。所有日期用 YYYY-MM-DD，時間用 24 小時 HH:mm。每個草案需包含標題、日期、開始/結束時間、分類、地點（可空字串）與安排理由。若使用者沒說日期，採用所提供日期。只回傳符合 JSON schema 的資料。';
+    const systemPrompt='你是繁體中文個人行程規劃助理。根據使用者需求和提供的日期、行程、待辦資料，提出最多 4 個可執行的行程草案。嚴格遵守使用者指定的時段與長度：例如「下午」只能排在 12:00–18:00；「2 小時」的開始與結束時間必須相差恰好 120 分鐘。避開既有行程，並優先安排現在之後最早的連續空檔。若找不到合適空檔，請在 summary 說明且不要提出不符合條件的時間。不要假設行程已被寫入。所有日期用 YYYY-MM-DD，時間用 24 小時 HH:mm。每個草案需包含標題、日期、開始/結束時間、分類、地點（可空字串）與安排理由。若使用者沒說日期，採用所提供日期。只回傳符合 JSON schema 的資料。';
     const result=await plannerModel.generateContent(systemPrompt+'\n'+JSON.stringify(input));
     const text=result.response.text();renderProposals(JSON.parse(text));
   }catch(error){console.error('Gemini 行程規劃失敗',error);showPlannerError('無法產生建議：'+(error.message||error.code||'請稍後再試。請確認 Firebase AI Logic 已啟用。'));}
@@ -100,7 +99,6 @@ if(plannerForm)plannerForm.addEventListener('submit',async event=>{
 });
 window.addEventListener('dayform-state-changed',event=>{window.dayformState=event.detail?.state||window.dayformState});
 window.addEventListener('dayform-cloud-state',event=>{window.dayformState=event.detail?.state||window.dayformState});
-window.addEventListener('dayform-add-ai-event',event=>{const item=event.detail?.event;if(!item)return;window.dispatchEvent(new CustomEvent('dayform-state-changed',{detail:{state:{...(window.dayformState||{}),events:[...(window.dayformState?.events||[]),item]}}}))});
 
 function setSession(user) {
   window.dispatchEvent(new CustomEvent('dayform-auth-changed', { detail: { user } }));
