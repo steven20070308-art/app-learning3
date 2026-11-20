@@ -30,8 +30,11 @@ let taskTab='today',categoryFilter='all',modalType=null,editingId=null,notificat
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const localSave=()=>localStorage.setItem('dayform-state',JSON.stringify(state));
-const save=()=>{localSave();window.dispatchEvent(new CustomEvent('dayform-state-changed',{detail:{state}}))};
-window.addEventListener('dayform-cloud-state',event=>{if(!event.detail?.state)return;state={...structuredClone(initialState),...event.detail.state};render()});
+const save=()=>{localSave();window.dayformState=state;window.dispatchEvent(new CustomEvent('dayform-state-changed',{detail:{state}}))};
+window.dayformState=state;
+window.addEventListener('dayform-add-ai-event',e=>{const event=e.detail?.event;if(!event)return;state.events.push(event);render()});
+window.addEventListener('dayform-refresh',()=>render());
+window.addEventListener('dayform-cloud-state',event=>{if(!event.detail?.state)return;state={...structuredClone(initialState),...event.detail.state};window.dayformState=state;render()});
 window.addEventListener('dayform-auth-changed',event=>{const user=event.detail?.user;if(user){const local=localStorage.getItem('dayform-state');if(local)window.dispatchEvent(new CustomEvent('dayform-local-state-ready',{detail:{state:JSON.parse(local)}}))}});
 function toast(message,error=false){const node=document.createElement('div');node.className='toast'+(error?' error':'');node.textContent=message;$('#toastRegion').append(node);setTimeout(()=>node.remove(),3000)}
 function pct(goal){if(goal.manual!==null&&goal.manual!==undefined)return Math.max(0,Math.min(100,Number(goal.manual)));const weight=goal.milestones.reduce((sum,m)=>sum+(Number(m.weight)||0),0);if(!weight)return 0;return Math.round(goal.milestones.reduce((sum,m)=>sum+(m.done?(Number(m.weight)||0):0),0)/weight*100)}
