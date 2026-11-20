@@ -27,23 +27,21 @@ if (auth) auth.useDeviceLanguage();
 let signInInProgress = false;
 const db = app ? getFirestore(app) : null;
 const ai = appCheck ? getAI(app, { backend: new GoogleAIBackend(), useLimitedUseAppCheckTokens: true }) : null;
-const plannerModel = ai ? getGenerativeModel(ai, {
-  model: 'gemini-3.8-flash',
-  generationConfig: {
-    responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 1024,
-    responseSchema: Schema.object({
-      properties: {
-        summary: Schema.string(),
-        proposals: Schema.array({ items: Schema.object({
-          properties: { title: Schema.string(), date: Schema.string(), startTime: Schema.string(), endTime: Schema.string(), category: Schema.string(), place: Schema.string(), reason: Schema.string() },
-          required: ['title','date','startTime','endTime','category','reason']
-        }) })
-      },
-      required: ['summary','proposals']
-    })
-  }
-}) : null;
-const provider = new GoogleAuthProvider();
+const plannerGenerationConfig = {
+  responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 1024,
+  responseSchema: Schema.object({
+    properties: {
+      summary: Schema.string(),
+      proposals: Schema.array({ items: Schema.object({
+        properties: { title: Schema.string(), date: Schema.string(), startTime: Schema.string(), endTime: Schema.string(), category: Schema.string(), place: Schema.string(), reason: Schema.string() },
+        required: ['title','date','startTime','endTime','category','reason']
+      }) })
+    },
+    required: ['summary','proposals']
+  })
+};
+const plannerModel = ai ? getGenerativeModel(ai, { model: 'gemini-3.8-flash', generationConfig: plannerGenerationConfig }) : null;
+const fallbackPlannerModel = ai ? getGenerativeModel(ai, { model: 'gemini-3.5-flash', generationConfig: plannerGenerationConfig }) : null;const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: 'select_account' });
 let stopSync = null, saveTimer = null, activeUid = null, stateListener = null, persistenceReady = Promise.resolve(), syncReady = false;
 if (auth) persistenceReady = setPersistence(auth, indexedDBLocalPersistence).catch(error => {
@@ -63,6 +61,21 @@ function planningContext() {
 }
 function showPlannerError(message) { plannerResult.hidden=false; plannerResult.innerHTML=''; const box=document.createElement('div'); box.className='ai-error'; box.textContent=message; plannerResult.append(box); }
 function formatTime(value){return /^([01]\d|2[0-3]):[0-5]\d$/.test(value||'')}
+function isTransientAiError(error) {
+  return /(?:\b503\b|\b504\b|deadline expired|temporarily unavailable|fetch-error)/i.test(String(error?.code || '') + ' ' + String(error?.message || ''));
+}
+async function generateWithRetry(model, request, modelName) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await model.generateContent(request);
+    } catch (error) {
+      if (!isTransientAiError(error) || attempt === 1) throw error;
+      const loading = plannerResult.querySelector('.ai-loading');
+      if (loading) loading.textContent = modelName + ' 回應較慢，正在重試…';
+      await new Promise(resolve => setTimeout(resolve, 700));
+    }
+  }
+}
 function renderProposals(data){
   plannerResult.innerHTML='';plannerResult.hidden=false;
   const heading=document.createElement('h3');heading.textContent='Gemini 行程草案';plannerResult.append(heading);
@@ -92,7 +105,16 @@ if(plannerForm)plannerForm.addEventListener('submit',async event=>{
     if(!plannerModel)throw new Error('Firebase AI Logic 尚未初始化。');
     const input={request:prompt,context:planningContext()};
     const systemPrompt='你是繁體中文個人行程規劃助理。根據使用者需求和提供的日期、行程、待辦資料，提出最多 4 個可執行的行程草案。嚴格遵守使用者指定的時段與長度：例如「下午」只能排在 12:00–18:00；「2 小時」的開始與結束時間必須相差恰好 120 分鐘。避開既有行程，並優先安排現在之後最早的連續空檔。若找不到合適空檔，請在 summary 說明且不要提出不符合條件的時間。不要假設行程已被寫入。所有日期用 YYYY-MM-DD，時間用 24 小時 HH:mm。每個草案需包含標題、日期、開始/結束時間、分類、地點（可空字串）與安排理由。若使用者沒說日期，採用所提供日期。只回傳符合 JSON schema 的資料。';
-    const result=await plannerModel.generateContent(systemPrompt+'\n'+JSON.stringify(input));
+    const request=systemPrompt+'\n'+JSON.stringify(input);
+    let result;
+    try {
+      result=await generateWithRetry(plannerModel,request,'Gemini 3.8 Flash');
+    } catch(error) {
+      if(!isTransientAiError(error)||!fallbackPlannerModel) throw error;
+      const loading=plannerResult.querySelector('.ai-loading');
+      if(loading) loading.textContent='Gemini 3.8 Flash 忙碌，改用 Gemini 3.5 Flash…';
+      result=await generateWithRetry(fallbackPlannerModel,request,'Gemini 3.5 Flash');
+    }
     const text=result.response.text();renderProposals(JSON.parse(text));
   }catch(error){console.error('Gemini 行程規劃失敗',error);showPlannerError('無法產生建議：'+(error.message||error.code||'請稍後再試。請確認 Firebase AI Logic 已啟用。'));}
   finally{run.disabled=false;run.textContent='✦ 產生安排'}
