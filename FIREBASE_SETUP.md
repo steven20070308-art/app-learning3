@@ -1,12 +1,15 @@
-# Firebase setup checklist
+# Firebase setup status
 
-Firebase-backed Google sign-in and Firestore sync are wired in `firebase-auth.js`, but the Firebase project configuration must be added before deployment.
+Firebase project `applearning-3162d` is connected to the web app `工作日常助手`.
 
-1. Create/open a Firebase project and register a Web App.
-2. Copy its `apiKey`, `authDomain`, `projectId`, and `appId` into `firebase-auth.js` (`firebaseConfig`). These web config values identify the Firebase project; the security boundary must be Firebase Auth and Firestore Rules. Never put Admin SDK/service account credentials in the browser or repository.
-3. In Firebase Authentication, enable Google as a sign-in provider.
-4. Add `steven20070308-art.github.io` to Authentication > Settings > Authorized domains (also add `localhost` for local testing).
-5. Create a Cloud Firestore database. Review `firestore.rules` and publish the rules. They restrict each account to its own `/users/{uid}/private/{document}` path.
-6. Deploy the updated site to GitHub Pages and test sign-in plus data sync with the same Google account on a computer and a phone.
+- Google sign-in is enabled. The app's GitHub Pages host, `steven20070308-art.github.io`, and `localhost` are authorized.
+- The default Cloud Firestore database exists. The deployed `cloud.firestore` rules match `firestore.rules` and only allow each signed-in user to access their own `/users/{uid}/private/{document}` data.
+- Firebase AI Logic uses the Gemini Developer API with `gemini-3.8-flash`.
+- App Check is registered with a reCAPTCHA Enterprise web key restricted to `steven20070308-art.github.io` and `localhost`. Gemini requests use limited-use App Check tokens.
+- The Firebase web app config and public App Check site key are in `firebase-auth.js`. Do not add Admin SDK or service account credentials to the browser or repository.
 
-The first sign-in asks whether to upload this browser's existing data when the cloud account is empty. If cloud data already exists and local data exists, it asks whether to use cloud data or keep and upload local data. On mobile, prefer opening the Pages URL directly in Safari or Chrome instead of an embedded in-app browser; privacy/partitioned-storage contexts can block Firebase OAuth redirect state.
+## Before the app changes go live
+
+Deploy the updated static files to GitHub Pages, then test Google sign-in and cross-device Firestore sync with the same Google account. On mobile, open the Pages URL directly in Safari or Chrome; embedded browsers can block OAuth redirect state.
+
+When Firebase Auth settings change, deploy with `npx -y firebase-tools@latest deploy --only auth`. Firestore rules are declared in `firestore.rules` and `firebase.json`.

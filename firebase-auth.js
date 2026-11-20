@@ -1,4 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app-check.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, browserLocalPersistence, indexedDBLocalPersistence, setPersistence } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 import { getAI, getGenerativeModel, GoogleAIBackend, Schema } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-ai.js';
@@ -9,17 +10,23 @@ const firebaseConfig = {
   authDomain: 'applearning-3162d.firebaseapp.com',
   projectId: 'applearning-3162d',
   appId: '1:228269124376:web:e86043e1e6ab7a09ed4c6d'
+
 };
+const appCheckSiteKey = '6Ld_AykuAAAAAC1bMhSgJF_mSqXhUjuvYkkFaigd';
 const configured = Object.values(firebaseConfig).every(value => value && !value.includes('YOUR_'));
 const localStateKey = 'dayform-state';
 function getSavedLocalState() { return localStorage.getItem(localStateKey); }
 const button = document.querySelector('#authButton');
 const app = configured ? initializeApp(firebaseConfig) : null;
+const appCheck = app ? initializeAppCheck(app, {
+  provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+  isTokenAutoRefreshEnabled: true
+}) : null;
 const auth = app ? getAuth(app) : null;
 if (auth) auth.useDeviceLanguage();
 let signInInProgress = false;
 const db = app ? getFirestore(app) : null;
-const ai = app ? getAI(app, { backend: new GoogleAIBackend() }) : null;
+const ai = appCheck ? getAI(app, { backend: new GoogleAIBackend(), useLimitedUseAppCheckTokens: true }) : null;
 const plannerModel = ai ? getGenerativeModel(ai, {
   model: 'gemini-3.8-flash',
   generationConfig: {
@@ -47,9 +54,12 @@ if (auth) persistenceReady = setPersistence(auth, indexedDBLocalPersistence).cat
 const plannerForm = document.querySelector('#aiPlannerForm');
 const plannerResult = document.querySelector('#aiPlannerResult');
 function planningContext() {
-  const dayEvents = (window.dayformState?.events || []).filter(e => !e.date || e.date === new Date().toISOString().slice(0,10));
+  const now = new Date();
+  const today = window.dayformTodayISO?.() || [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+  const date = window.dayformSelectedDateISO?.() || today;
+  const dayEvents = (window.dayformState?.events || []).filter(e => (e.date || today) === date);
   const tasks = window.dayformState?.tasks || [];
-  return { date: document.querySelector('#scheduleDate')?.textContent || new Date().toLocaleDateString('zh-TW'), events: dayEvents.map(({title,time,end,place,category})=>({title,time,end,place,category})), tasks: tasks.filter(t=>!t.done).map(({title,due,category,priority})=>({title,due,category,priority})) };
+  return { date, events: dayEvents.map(({title,time,end,place,category})=>({title,time,end,place,category})), tasks: tasks.filter(t=>!t.done).map(({title,due,category,priority})=>({title,due,category,priority})) };
 }
 function showPlannerError(message) { plannerResult.hidden=false; plannerResult.innerHTML=''; const box=document.createElement('div'); box.className='ai-error'; box.textContent=message; plannerResult.append(box); }
 function formatTime(value){return /^([01]\d|2[0-3]):[0-5]\d$/.test(value||'')}
@@ -71,7 +81,7 @@ function renderProposals(data){
   const dismiss=document.createElement('button');dismiss.type='button';dismiss.textContent='取消';dismiss.onclick=()=>{plannerResult.hidden=true};
   const apply=document.createElement('button');apply.type='button';apply.className='apply-ai-proposal';apply.textContent='確認並加入行程';apply.onclick=()=>{
     const checks=[...list.querySelectorAll('input[type=checkbox]')];let added=0;
-    checks.forEach((check,i)=>{if(!check.checked)return;const item=data.proposals[Number(check.dataset.proposal)];if(!item)return;const collision=(window.dayformState?.events||[]).some(e=>e.date===item.date&&e.time<item.endTime&&e.end>item.startTime);if(collision)return;window.dispatchEvent(new CustomEvent('dayform-add-ai-event',{detail:{event:{id:crypto.randomUUID(),title:item.title,category:['工作','生活','學習'].includes(item.category)?item.category:'學習',date:item.date,time:item.startTime,end:item.endTime,place:item.place||'Gemini 建議',source:'gemini'}}}));added++});
+    checks.forEach((check,i)=>{if(!check.checked)return;const item=data.proposals[Number(check.dataset.proposal)];if(!item)return;const collision=(window.dayformState?.events||[]).some(e=>(e.date||window.dayformTodayISO?.())===item.date&&e.time<item.endTime&&e.end>item.startTime);if(collision)return;window.dispatchEvent(new CustomEvent('dayform-add-ai-event',{detail:{event:{id:crypto.randomUUID(),title:item.title,category:['工作','生活','學習'].includes(item.category)?item.category:'學習',date:item.date,time:item.startTime,end:item.endTime,place:item.place||'Gemini 建議',source:'gemini'}}}));added++});
     plannerResult.hidden=true;window.dispatchEvent(new CustomEvent('dayform-refresh'));if(added)alert('已加入 '+added+' 筆 AI 行程草案。');else alert('沒有加入行程：請勾選草案，並確認時間沒有與既有行程重疊。');
   };
   actions.append(dismiss,apply);plannerResult.append(actions);
@@ -166,12 +176,7 @@ if (button) button.addEventListener('click', async () => {
     await persistenceReady;
     if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
       signInInProgress = true;
-      try {
-        await signInWithPopup(auth, provider);
-      } catch (popupError) {
-        if (!['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/operation-not-supported-in-this-environment'].includes(popupError.code)) throw popupError;
-        await signInWithRedirect(auth, provider);
-      }
+      await signInWithRedirect(auth, provider);
       return;
     }
     await signInWithPopup(auth, provider);

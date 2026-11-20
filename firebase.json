@@ -1,1 +1,17 @@
-{}
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "日序 DAYFORM",
+        "supportEmail": "steven20070308@gmail.com",
+        "authorizedRedirectUris": [
+          "https://applearning-3162d.firebaseapp.com/__/auth/handler",
+          "http://localhost"
+        ]
+      }
+    }
+  }
+}
