@@ -55,9 +55,10 @@ function planningContext() {
   const now = new Date();
   const today = window.dayformTodayISO?.() || [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
   const date = window.dayformSelectedDateISO?.() || today;
-  const dayEvents = (window.dayformState?.events || []).filter(e => (e.date || today) === date);
+  const dayEvents = (window.dayformState?.events || []).filter(e => !e.cancelled && (e.date || today) === date);
   const tasks = window.dayformState?.tasks || [];
-  return { date, events: dayEvents.map(({title,time,end,place,category})=>({title,time,end,place,category})), tasks: tasks.filter(t=>!t.done).map(({title,due,category,priority})=>({title,due,category,priority})) };
+  const deadlines = (window.dayformState?.deadlines || []).filter(item => !item.done && item.date >= today).sort((a,b)=>a.date.localeCompare(b.date)).map(item=>({title:item.title,type:item.type,date:item.date,daysRemaining:Math.round((new Date(item.date+'T12:00:00')-new Date(today+'T12:00:00'))/86400000),description:item.description||''}));
+  return { today, date, events: dayEvents.map(({title,time,end,place,category})=>({title,time,end,place,category})), tasks: tasks.filter(t=>!t.done).map(({title,due,category,priority})=>({title,due,category,priority})), deadlines };
 }
 function showPlannerError(message) { plannerResult.hidden=false; plannerResult.innerHTML=''; const box=document.createElement('div'); box.className='ai-error'; box.textContent=message; plannerResult.append(box); }
 function formatTime(value){return /^([01]\d|2[0-3]):[0-5]\d$/.test(value||'')}
@@ -69,7 +70,13 @@ function timeToMinutes(value) {
 function isTransientAiError(error) {
   const details = String(error?.code || '') + ' ' + String(error?.message || '');
   return /(?:\b503\b|\b504\b|deadline expired|temporarily unavailable|fetch-error|failed to fetch|error fetching|networkerror|network error|load failed|err_connection|err_name_not_resolved)/i.test(details);
-}async function generateWithRetry(model, request, modelName) {
+}
+function withTimeout(promise,milliseconds){
+  let timer;
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(new Error("AI request timed out."),{code:"ai/timeout"})),milliseconds)});
+  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
+}
+async function generateWithRetry(model, request, modelName) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       return await model.generateContent(request);
@@ -81,75 +88,136 @@ function isTransientAiError(error) {
     }
   }
 }
-function renderProposals(data){
+function renderProposals(data,preserveSelection=false){
+  const previousSelection=preserveSelection?new Set([...plannerResult.querySelectorAll('.ai-proposal input:checked')].map(check=>check.dataset.proposalKey)):null;
+  const addedKeys=plannerResult.__addedProposalKeys||(plannerResult.__addedProposalKeys=new Set());
+  plannerResult.__proposalData=data;
   plannerResult.innerHTML='';plannerResult.hidden=false;
-  const heading=document.createElement('h3');heading.textContent='Gemini 行程草案';plannerResult.append(heading);
-  const summary=document.createElement('p');summary.className='ai-result-intro';summary.textContent=data.summary||'以下是建議安排，請確認後再加入行程。';plannerResult.append(summary);
+  const t=value=>window.dayformTranslate?.(value)||value;
+  const locale=window.dayformIntlLocale?.()||'zh-TW';
+  const language=window.dayformLocale?.()||'zh-Hant';
+  const addLabels={
+    'zh-Hant':['✓ 加入','✓ 已加入'],en:['✓ Add','✓ Added'],ja:['✓ 追加','✓ 追加済み'],
+    ko:['✓ 추가','✓ 추가됨'],ru:['✓ Добавить','✓ Добавлено'],fr:['✓ Ajouter','✓ Ajouté'],
+    ar:['✓ أضف','✓ تمت الإضافة'],th:['✓ เพิ่ม','✓ เพิ่มแล้ว'],de:['✓ Hinzufügen','✓ Hinzugefügt']
+  }[language]||['✓ Add','✓ Added'];
+  const heading=document.createElement('h3');heading.textContent=t('Gemini 行程草案');plannerResult.append(heading);
+  const summary=document.createElement('p');summary.className='ai-result-intro';summary.textContent=data.summary||t('以下是建議安排，請確認後再加入行程。');plannerResult.append(summary);
+  const note=document.createElement('p');note.className='ai-preview-note';note.textContent=t('預覽：核對日期、起訖時間、時長與衝突後再加入。');plannerResult.append(note);
   const list=document.createElement('div');list.className='ai-proposal-list';
-  (data.proposals||[]).slice(0,6).forEach((item,index)=>{
-    if(!item||typeof item.title!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(item.date)||!formatTime(item.startTime)||!formatTime(item.endTime)||item.endTime<=item.startTime)return;
-    const row=document.createElement('label');row.className='ai-proposal';
-    const check=document.createElement('input');check.type='checkbox';check.checked=true;check.proposal=item;
-    const copy=document.createElement('span');const title=document.createElement('span');title.className='ai-proposal-title';title.textContent=item.title;const detail=document.createElement('span');detail.className='ai-proposal-detail';detail.textContent=String(item.date)+' · '+item.startTime+'–'+item.endTime+' · '+(item.place||'');copy.append(title,detail);
-    const category=document.createElement('span');category.className='task-category 學習';category.textContent=item.category||'學習';row.append(check,copy,category);list.append(row);
+  (data.proposals||[]).slice(0,6).forEach(item=>{
+    if(!item||typeof item.title!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(item.date)||!formatTime(item.startTime)||!formatTime(item.endTime)||timeToMinutes(item.endTime)<=timeToMinutes(item.startTime))return;
+    const row=document.createElement('div');row.className='ai-proposal';
+    const key=[item.date,item.startTime,item.endTime,item.title].join('|');
+    const normalizedCategory=({Work:'工作',Life:'生活',Study:'學習'}[item.category])||item.category;
+    const proposalItem={...item,category:normalizedCategory};
+    const check=document.createElement('input');check.type='checkbox';check.checked=previousSelection?previousSelection.has(key):true;check.proposal=proposalItem;check.dataset.proposalKey=key;
+    const copy=document.createElement('span');copy.className='ai-proposal-copy';
+    const title=document.createElement('span');title.className='ai-proposal-title';title.textContent=item.title;
+    const start=timeToMinutes(item.startTime),end=timeToMinutes(item.endTime),duration=end-start;
+    const dateLabel=new Intl.DateTimeFormat(locale,{weekday:'short',month:'short',day:'numeric',year:'numeric'}).format(new Date(item.date+'T12:00:00'));
+    const durationLabel=window.dayformFormatDuration?.(duration)||duration+' min';
+    const detail=document.createElement('span');detail.className='ai-proposal-detail';detail.textContent=dateLabel+' · '+item.startTime+'–'+item.endTime+' · '+t('時長')+' '+durationLabel;
+    copy.append(title,detail);
+    if(item.reason){const reason=document.createElement('span');reason.className='ai-proposal-reason';reason.textContent=t('安排理由')+'：'+item.reason;copy.append(reason)}
+    const status=document.createElement('span');status.className='ai-proposal-status';status.textContent=t('未選取');copy.append(status);
+    const category=document.createElement('span');category.className='task-category '+(['工作','生活','學習'].includes(normalizedCategory)?normalizedCategory:'學習');category.textContent=t(normalizedCategory||'學習');
+    const quickAdd=document.createElement('button');quickAdd.type='button';quickAdd.className='ai-proposal-add';
+    const alreadyAdded=addedKeys.has(key);quickAdd.textContent=alreadyAdded?addLabels[1]:addLabels[0];quickAdd.disabled=alreadyAdded;
+    if(alreadyAdded)check.disabled=true;
+    row.append(check,copy,category,quickAdd);list.append(row);
+    quickAdd.addEventListener('click',()=>{
+      if(addedKeys.has(key))return;
+      const conflict=(window.dayformState?.events||[]).find(event=>!event.cancelled&&(event.date||window.dayformTodayISO?.())===item.date&&overlaps(item,event));
+      if(conflict){
+        status.textContent=t('時間衝突')+'：'+t('現有行程')+'「'+conflict.title+'」'+conflict.time+'–'+conflict.end;
+        row.classList.add('has-conflict');status.classList.add('conflict');
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('dayform-add-ai-event',{detail:{event:{id:crypto.randomUUID(),title:item.title,category:['工作','生活','學習'].includes(normalizedCategory)?normalizedCategory:'學習',date:item.date,time:item.startTime,end:item.endTime,place:item.place||'Gemini 建議',source:'gemini'}}}));
+      addedKeys.add(key);quickAdd.textContent=addLabels[1];quickAdd.disabled=true;check.checked=false;check.disabled=true;updatePreview();
+    });
   });
-  if(!list.children.length){showPlannerError('AI 回覆的行程格式不完整，請調整描述後再試。');return}
+  if(!list.children.length){showPlannerError(t('AI 回覆的行程格式不完整，請調整描述後再試。'));return}
   plannerResult.append(list);
+  function overlaps(a,b){
+    if(a.date!==(b.date||a.date))return false;
+    const aStart=timeToMinutes(a.startTime||a.time),aEnd=timeToMinutes(a.endTime||a.end),bStart=timeToMinutes(b.startTime||b.time),bEnd=timeToMinutes(b.endTime||b.end);
+    return aStart!==null&&aEnd!==null&&bStart!==null&&bEnd!==null&&aStart<bEnd&&aEnd>bStart;
+  }
+  function updatePreview(){
+    const selected=[...list.querySelectorAll('input[type=checkbox]:checked')];
+    const accepted=[],problems=[];
+    selected.forEach(check=>{
+      const item=check.proposal,row=check.closest('.ai-proposal'),status=row.querySelector('.ai-proposal-status'),messages=[];
+      (window.dayformState?.events||[]).filter(event=>!event.cancelled&&(event.date||window.dayformTodayISO?.())===item.date&&overlaps(item,event)).forEach(event=>messages.push(t('現有行程')+'「'+event.title+'」'+event.time+'–'+event.end));
+      accepted.forEach(previous=>{if(overlaps(item,previous))messages.push(t('另一個已選草案')+'「'+previous.title+'」'+previous.startTime+'–'+previous.endTime)});
+      row.classList.toggle('has-conflict',messages.length>0);
+      status.classList.toggle('conflict',messages.length>0);
+      status.classList.toggle('clear',messages.length===0);
+      status.textContent=messages.length?t('時間衝突')+'：'+messages.join('；'):t('沒有時間衝突');
+      if(messages.length)problems.push(item.title+' ('+item.startTime+'–'+item.endTime+'): '+messages.join('；'));
+      else accepted.push(item);
+    });
+    list.querySelectorAll('input[type=checkbox]:not(:checked)').forEach(check=>{
+      const status=check.closest('.ai-proposal')?.querySelector('.ai-proposal-status');
+      if(status){status.classList.remove('conflict','clear');status.textContent=t('未選取')}
+    });
+    return {selected,accepted,problems};
+  }
+  list.addEventListener('change',updatePreview);
+  updatePreview();
   const actions=document.createElement('div');actions.className='ai-proposal-actions';
-  const dismiss=document.createElement('button');dismiss.type='button';dismiss.textContent='取消';dismiss.onclick=()=>{plannerResult.hidden=true};
-  const apply=document.createElement('button');apply.type='button';apply.className='apply-ai-proposal';apply.textContent='確認並加入行程';
+  const dismiss=document.createElement('button');dismiss.type='button';dismiss.textContent=t('取消');dismiss.onclick=()=>{plannerResult.hidden=true};
+  const apply=document.createElement('button');apply.type='button';apply.className='apply-ai-proposal';apply.textContent=t('確認並加入行程');
   apply.onclick=()=>{
-    const checks=[...list.querySelectorAll('input[type=checkbox]:checked')];
-    if(!checks.length){alert('請先勾選要加入的行程草案。');return}
-    const now=new Date();
-    const today=window.dayformTodayISO?.()||[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
-    let added=0;
-    const conflicts=[];
-    for(const check of checks){
-      const item=check.proposal;
-      if(!item)continue;
-      const start=timeToMinutes(item.startTime),end=timeToMinutes(item.endTime);
-      if(start===null||end===null||end<=start)continue;
-      const events=window.dayformState?.events||[];
-      const conflict=events.find(e=>{
-        if((e.date||today)!==item.date)return false;
-        const eventStart=timeToMinutes(e.time),eventEnd=timeToMinutes(e.end);
-        return eventStart!==null&&eventEnd!==null&&eventEnd>eventStart&&start<eventEnd&&end>eventStart;
-      });
-      if(conflict){conflicts.push(item.startTime+'–'+item.endTime+' 與「'+conflict.title+'」'+conflict.time+'–'+conflict.end+' 重疊');continue}
-      window.dispatchEvent(new CustomEvent('dayform-add-ai-event',{detail:{event:{id:crypto.randomUUID(),title:item.title,category:['工作','生活','學習'].includes(item.category)?item.category:'學習',date:item.date,time:item.startTime,end:item.endTime,place:item.place||'Gemini 建議',source:'gemini'}}}));
-      added++;
-    }
-    plannerResult.hidden=true;
-    window.dispatchEvent(new CustomEvent('dayform-refresh'));
-    if(added)alert('已加入 '+added+' 筆 AI 行程草案。');
-    else if(conflicts.length)alert('沒有加入行程，時段與既有行程重疊：'+conflicts.join('；'));
-    else alert('行程沒有加入，請重新產生草案後再試。');
-  };  actions.append(dismiss,apply);plannerResult.append(actions);
+    const result=updatePreview();
+    if(!result.selected.length){alert(t('請先勾選要加入的行程草案。'));return}
+    if(!result.accepted.length){alert(t('這些草案都有時間衝突，尚未加入。')+'\n'+result.problems.join('\n'));return}
+    result.accepted.forEach(item=>window.dispatchEvent(new CustomEvent('dayform-add-ai-event',{detail:{event:{id:crypto.randomUUID(),title:item.title,category:['工作','生活','學習'].includes(item.category)?item.category:'學習',date:item.date,time:item.startTime,end:item.endTime,place:item.place||'Gemini 建議',source:'gemini'}}})));
+    plannerResult.hidden=true;window.dispatchEvent(new CustomEvent('dayform-refresh'));
+    const added={
+      'zh-Hant':n=>'已加入 '+n+' 筆 AI 行程草案。',en:n=>'Added '+n+' AI proposal(s).',ja:n=>'AIの予定を'+n+'件追加しました。',
+      ko:n=>'AI 일정 '+n+'개를 추가했습니다.',ru:n=>'Добавлено предложений: '+n+'.',fr:n=>n+' proposition(s) IA ajoutée(s).',
+      ar:n=>'تمت إضافة '+n+' اقتراحات من الذكاء الاصطناعي.',th:n=>'เพิ่มรายการจาก AI '+n+' รายการแล้ว',de:n=>n+' KI-Vorschläge hinzugefügt.'
+    };
+    const skipped={'zh-Hant':' 略過衝突：',en:' Skipped due to conflicts: ',ja:' 時間が重複したためスキップ：',ko:' 시간 충돌로 건너뜀: ',ru:' Пропущено из-за конфликтов: ',fr:' Ignoré en raison de conflits : ',ar:' تم التخطي بسبب تعارض الأوقات: ',th:' ข้ามเนื่องจากเวลาซ้ำ: ',de:' Wegen Zeitkonflikten übersprungen: '};
+    let message=(added[language]||added.en)(result.accepted.length);
+    if(result.problems.length)message+=(skipped[language]||skipped.en)+result.problems.join(language==='zh-Hant'?'；':'; ');
+    alert(message);
+  };
+  actions.append(dismiss,apply);plannerResult.append(actions);
 }
+window.addEventListener('dayform-language-changed',()=>{if(plannerResult.__proposalData&&!plannerResult.hidden)renderProposals(plannerResult.__proposalData,true)});
 if(plannerForm)plannerForm.addEventListener('submit',async event=>{
-  event.preventDefault();const prompt=document.querySelector('#aiPlannerPrompt').value.trim();if(!prompt)return;
+  event.preventDefault();const prompt=document.querySelector('#aiPlannerPrompt').value.trim();if(!prompt)return;plannerResult.__addedProposalKeys=new Set();
   const run=plannerForm.querySelector('button[type=submit]');run.disabled=true;run.textContent='Gemini 安排中…';plannerResult.hidden=false;plannerResult.innerHTML='<div class="ai-loading">正在參考你的待辦與當日行程產生建議…</div>';
   try{
     if(!plannerModel)throw new Error('Firebase AI Logic 尚未初始化。');
     const input={request:prompt,context:planningContext()};
-    const systemPrompt='你是繁體中文個人行程規劃助理。根據使用者需求和提供的日期、行程、待辦資料，提出最多 4 個可執行的行程草案。嚴格遵守使用者指定的時段與長度：例如「下午」只能排在 12:00–18:00；「2 小時」的開始與結束時間必須相差恰好 120 分鐘。避開既有行程，並優先安排現在之後最早的連續空檔。若找不到合適空檔，請在 summary 說明且不要提出不符合條件的時間。不要假設行程已被寫入。所有日期用 YYYY-MM-DD，時間用 24 小時 HH:mm。每個草案需包含標題、日期、開始/結束時間、分類、地點（可空字串）與安排理由。若使用者沒說日期，採用所提供日期。只回傳符合 JSON schema 的資料。';
+    const responseLanguage=window.dayformAiLanguage?.()||'Traditional Chinese';
+    const systemPrompt='你是個人行程規劃助理。根據使用者需求和提供的日期、行程、待辦資料，提出最多 4 個可執行的行程草案。嚴格遵守使用者指定的時段與長度：例如「下午」只能排在 12:00–18:00；「2 小時」的開始與結束時間必須相差恰好 120 分鐘。避開既有行程，並優先安排現在之後最早的連續空檔。若找不到合適空檔，請在 summary 說明且不要提出不符合條件的時間。不要假設行程已被寫入。所有日期用 YYYY-MM-DD，時間用 24 小時 HH:mm。也要考量提供的考試與作業截止日；若期限在未來 14 天內且空檔允許，請在截止日前分散安排準備或複習時段，不要安排到截止日之後。每個草案需包含標題、日期、開始/結束時間、分類、地點（可空字串）與安排理由。summary、title、place、reason 欄位請使用 '+responseLanguage+'。category 欄位必須使用「工作」「生活」「學習」其中之一。若使用者沒說日期，採用所提供日期。只回傳符合 JSON schema 的資料。';
     const request=systemPrompt+'\n'+JSON.stringify(input);
-    let result;
-    try {
-      result=await generateWithRetry(plannerModel,request,'Gemini 3.8 Flash');
-    } catch(error) {
-      if(!isTransientAiError(error)||!fallbackPlannerModel) throw error;
-      const loading=plannerResult.querySelector('.ai-loading');
-      if(loading) loading.textContent='Gemini 3.8 Flash 忙碌，改用 Gemini 3.5 Flash…';
-      result=await generateWithRetry(fallbackPlannerModel,request,'Gemini 3.5 Flash');
-    }
+    const generation=(async()=>{
+      try {
+        return await generateWithRetry(plannerModel,request,'Gemini 3.8 Flash');
+      } catch(error) {
+        if(!isTransientAiError(error)||!fallbackPlannerModel) throw error;
+        const loading=plannerResult.querySelector('.ai-loading');
+        if(loading) loading.textContent='Gemini 3.8 Flash 忙碌，改用 Gemini 3.5 Flash…';
+        return await generateWithRetry(fallbackPlannerModel,request,'Gemini 3.5 Flash');
+      }
+    })();
+    const result=await withTimeout(generation,30000);
     const text=result.response.text();renderProposals(JSON.parse(text));
   }catch(error){
     console.error('Gemini 行程規劃失敗',error);
-    const message=isTransientAiError(error)
-      ? 'AI 服務連線失敗，已重試主要及備援模型。請確認網路可連線至 firebasevertexai.googleapis.com 後再試。'
-      : '無法產生建議：'+(error.message||error.code||'請稍後再試。請確認 Firebase AI Logic 已啟用。');
+    const needsSetup=/app.?check|recaptcha/i.test(String(error?.message||''));
+    const message=error?.code==='ai/timeout'||needsSetup
+      ? 'AI 暫時無法使用，請稍後再試。'
+      : isTransientAiError(error)
+        ? 'AI 服務連線失敗，已重試主要及備援模型。請確認網路可連線至 firebasevertexai.googleapis.com 後再試。'
+        : '無法產生建議：'+(error.message||error.code||'請稍後再試。請確認 Firebase AI Logic 已啟用。');
     showPlannerError(message);
   }  finally{run.disabled=false;run.textContent='✦ 產生安排'}
 });
@@ -161,9 +229,10 @@ function setSession(user) {
   document.documentElement.dataset.firebaseUser = user ? 'signed-in' : 'signed-out';
   if (!button) return;
   button.textContent = user ? (user.displayName || user.email || '帳戶') : '使用 Google 登入';
-  button.title = user ? `已登入 ${user.email || ''} · 點擊登出` : '使用 Google 帳號登入';
+  button.title = user ? ('已登入 '+(user.email || '')+' · 點擊登出') : (window.dayformTranslate?.('使用 Google 帳號登入') || '使用 Google 帳號登入');
   button.classList.toggle('is-signed-in', Boolean(user));
 }
+window.addEventListener('dayform-language-changed',()=>{if(button&&!window.dayformUser)button.title=window.dayformTranslate?.('使用 Google 帳號登入')||'使用 Google 帳號登入'});
 function startSync(user) {
   if (stopSync) stopSync();
   stopSync = null; activeUid = user.uid; syncReady = false;
